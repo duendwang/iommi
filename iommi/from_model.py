@@ -14,7 +14,6 @@ from tri_declarative import (
     dispatch,
     Namespace,
     Refinable,
-    RefinableObject,
     setdefaults_path,
 )
 from tri_struct import Struct
@@ -24,7 +23,7 @@ from iommi.base import (
     MISSING,
 )
 from iommi.evaluate import evaluate
-from iommi.reinvokable import set_and_remember_for_reinvoke
+from iommi.refinable import RefinableObject
 
 
 def create_members_from_model(
@@ -111,7 +110,7 @@ def member_from_model(
                 model_field_name=field_path_rest,
                 **kwargs,
             )
-            set_and_remember_for_reinvoke(result, attr=model_field_name)
+            result = result.refine(attr=model_field_name)
             return result
 
     factory = factory_lookup.get(type(model_field), MISSING)

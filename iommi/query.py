@@ -86,22 +86,46 @@ from iommi.from_model import (
 )
 from iommi.member import (
     bind_members,
-    collect_members,
+    refine_done_members,
 )
 from iommi.part import (
     Part,
     request_data,
 )
-from iommi.reinvokable import (
-    reinvokable,
-    reinvoke,
-    set_and_remember_for_reinvoke,
-)
-from iommi.traversable import (
-    declared_members,
+from iommi.refinable import (
     EvaluatedRefinable,
-    set_declared_member,
+    RefinableMembers,
 )
+from pyparsing import (
+    alphanums,
+    alphas,
+    Char,
+    Forward,
+    Group,
+    Keyword,
+    oneOf,
+    ParseException,
+    ParseResults,
+    QuotedString,
+    quotedString,
+    Word,
+    ZeroOrMore,
+)
+from tri_declarative import (
+    class_shortcut,
+    declarative,
+    dispatch,
+    EMPTY,
+    getattr_path,
+    Namespace,
+    Refinable,
+    refinable,
+    setdefaults_path,
+    Shortcut,
+    with_meta,
+    flatten,
+)
+from tri_struct import Struct
 
 
 class QueryException(Exception):
@@ -240,7 +264,6 @@ class Filter(Part):
     is_valid_filter = Refinable()
     query_name = EvaluatedRefinable()
 
-    @reinvokable
     @dispatch(
         query_operator_for_field='=',
         attr=MISSING,
@@ -260,11 +283,13 @@ class Filter(Part):
         :param field__include: set to `True` to display a GUI element for this filter in the basic style interface.
         :param field__call_target: the factory to create a `Field` for the basic GUI, for example `Field.choice`. Default: `Field`
         """
-        model_field = kwargs.get('model_field')
-        if model_field and model_field.remote_field:
-            kwargs['model'] = model_field.remote_field.model
-
         super(Filter, self).__init__(**kwargs)
+
+    def on_refine_done(self):
+        model_field = self.model_field
+        if model_field and model_field.remote_field:
+            self.model = model_field.remote_field.model
+        super(Filter, self).on_refine_done()
 
     def on_bind(self) -> None:
         if self.attr is MISSING:
@@ -559,29 +584,28 @@ class QueryAutoConfig(AutoConfig):
 class Advanced(Fragment):
     toggle: Namespace = Refinable()
 
-    @dispatch(toggle=EMPTY)
-    @reinvokable
+    @dispatch(
+        toggle__call_target=Action,
+        toggle__attrs__href='#',
+        toggle__attrs__class__iommi_query_toggle_simple_mode=True,
+        toggle__attrs={'data-advanced-mode': 'simple'},
+    )
     def __init__(self, **kwargs):
         super(Advanced, self).__init__(**kwargs)
 
-        toggle = setdefaults_path(
-            Namespace(),
-            self.toggle,
+    def on_refine_done(self):
+        self.toggle = self.toggle(
             _name='toggle',
-            call_target=Action,
-            attrs__href='#',
-            attrs__class__iommi_query_toggle_simple_mode=True,
-            attrs={'data-advanced-mode': 'simple'},
             display_name=gettext('Switch to advanced search'),
-        )
-        self.toggle = declared_members(self).toggle = toggle()
+        ).refine_done(parent=self)
+        super(Advanced, self).on_refine_done()
 
     def on_bind(self) -> None:
         super(Advanced, self).on_bind()
-        self.toggle = self._bound_members.toggle = self.toggle.bind(parent=self)
+        self.toggle = self.toggle.bind(parent=self)
 
 
-@declarative(Filter, '_filters_dict')
+@declarative(Filter, '_filters_dict', add_init_kwargs=False)
 @with_meta
 class Query(Part):
     """
@@ -598,6 +622,7 @@ class Query(Part):
         )
     """
 
+    auto: Namespace = Refinable()
     form: Namespace = Refinable()
     advanced: Namespace = Refinable()
     model: Type[Model] = Refinable()  # model is evaluated, but in a special way so gets no EvaluatedRefinable type
@@ -608,11 +633,13 @@ class Query(Part):
     member_class = Refinable()
     form_class = Refinable()
 
+    # Filters need to be at the end to not steal the short names
+    filters: Namespace = RefinableMembers()
+
     class Meta:
         member_class = Filter
         form_class = Form
 
-    @reinvokable
     @dispatch(
         endpoints__errors__func=default_endpoint__errors,
         filters=EMPTY,
@@ -623,95 +650,54 @@ class Query(Part):
         form_container__attrs__class__iommi_query_form_simple=True,
         advanced__call_target=Advanced,
     )
-    def __init__(self, *, model=None, rows=None, filters=None, _filters_dict=None, auto=None, **kwargs):
-        assert isinstance(filters, dict)
+    def __init__(self, **kwargs):
+        super(Query, self).__init__(**kwargs)
 
-        if auto:
-            auto = QueryAutoConfig(**auto)
-            auto_model, auto_rows, filters = self._from_model(
+    def on_refine_done(self):
+        assert isinstance(self.filters, dict)
+
+        if self.auto:
+            auto = QueryAutoConfig(**self.auto).refine_done(parent=self)
+            model, rows, filters = self._from_model(
                 model=auto.model,
                 rows=auto.rows,
-                filters=filters,
+                filters=self.filters,
                 include=auto.include,
                 exclude=auto.exclude,
             )
 
-            assert model is None, (
+            assert self.model is None, (
                 "You can't use the auto feature and explicitly pass model. "
                 "Either pass auto__model, or we will set the model for you from auto__rows"
             )
-            model = auto_model
 
-            if rows is None:
-                rows = auto_rows
+            if self.model is None:
+                self.model = model
 
-        model, rows = model_and_rows(model, rows)
+            if self.rows is None:
+                self.rows = rows
 
-        setdefaults_path(
-            kwargs,
-            form__call_target=self.get_meta().form_class,
-        )
+            self.filters.update(filters)
+
+        self.model, self.rows = model_and_rows(self.model, self.rows)
 
         self.query_advanced_value = None
         self.query_error = None
 
-        # Here we need to remove the freetext config from kwargs because we want to
-        # handle it differently from the other fields.
-        # BUT It's not safe to modify kwargs deeply! Because reinvoke() is evil:
-        # It will call init again with the same kwargs + whatever additional kwargs
-        # might have come from a parent or styling info.
-        freetext_config = kwargs.get('form', {}).get('fields', {}).get('freetext', {})
-        if 'form' in kwargs and 'fields' in kwargs['form'] and 'freetext' in kwargs['form']['fields']:
-            # copy (just) the namespace so we can safely remove freetext from it
-            kwargs = Namespace(flatten(Namespace(kwargs)))
-            freetext_config = kwargs.get('form', {}).get('fields', {}).pop('freetext', {})
-
-        super(Query, self).__init__(model=model, rows=rows, **kwargs)
-
-        collect_members(self, name='filters', items=filters, items_dict=_filters_dict, cls=self.get_meta().member_class)
-
-        field_class = self.get_meta().form_class.get_meta().member_class
-
-        declared_fields = Struct()
-        declared_fields[FREETEXT_SEARCH_NAME] = field_class(
-            _name=FREETEXT_SEARCH_NAME,
-            display_name=gettext('Search'),
-            required=False,
-            include=False,
-            help__include=False,
-            **freetext_config,
+        refine_done_members(
+            self,
+            name='filters',
+            items=self.filters,
+            items_dict=self.get_declared('_filters_dict'),
+            cls=self.get_meta().member_class,
         )
 
-        for name, filter in items(declared_members(self).filters):
-            field = setdefaults_path(
-                Namespace(),
-                filter.field,
-                _name=name,
-                model_field=filter.model_field,
-                attr=name if filter.attr is MISSING else filter.attr,
-                call_target__cls=field_class,
-                help__include=False,
-            )
-            declared_fields[name] = field()
+        self._on_refine_done_form()
 
-        # noinspection PyCallingNonCallable
-        self.form: Form = self.form(
-            _name='form',
-            _fields_dict=declared_fields,
-            attrs__method='get',
-            actions__submit=dict(
-                attrs={'data-iommi-filter-button': ''},
-                display_name=gettext('Filter'),
-            ),
-        )
-        declared_members(self).form = self.form
+        self.advanced = self.advanced(_name='advanced').refine_done(parent=self)
+        self.form_container = self.form_container(_name='form_container').refine_done(parent=self)
 
-        self.advanced = declared_members(self).advanced = self.advanced(_name='advanced')
-
-        self.form_container = self.form_container(_name='form_container')
-
-        # Filters need to be at the end to not steal the short names
-        set_declared_member(self, 'filters', declared_members(self).pop('filters'))
+        super(Query, self).on_refine_done()
 
     @dispatch(
         render__call_target=render_template,
@@ -728,6 +714,55 @@ class Query(Part):
 
         return render(request=self.get_request())
 
+    def _on_refine_done_form(self):
+
+        field_class = self.get_meta().form_class.get_meta().member_class
+
+        declared_fields = Struct()
+        declared_fields[FREETEXT_SEARCH_NAME] = field_class(
+            _name=FREETEXT_SEARCH_NAME,
+            display_name=gettext('Search'),
+            required=False,
+            include=any(filter.freetext for filter in values(self.namespace.filters)),
+            help__include=False,
+            **self.namespace.form.get('fields', {}).get(FREETEXT_SEARCH_NAME, {}),
+        )
+
+        for name, filter in items(self.namespace.filters):
+            declared_fields[name] = setdefaults_path(
+                Namespace(),
+                filter.field,
+                _name=name,
+                call_target__cls=field_class,
+                model_field=filter.model_field,
+                attr=name if filter.attr is MISSING else filter.attr,
+                help__include=False,
+            )
+
+        # Remove fields from the form that correspond to non-included filters
+        declared_filters = self.namespace.filters
+        for name, field in items(declared_fields):
+            if name == FREETEXT_SEARCH_NAME:
+                continue
+            # We need to check if it's in declared_filters first, otherwise we remove any injected fields
+            if name in declared_filters and name not in self.namespace.filters:
+                declared_fields[name] = field.refine(include=False)
+
+        form_args = self.form
+
+        # noinspection PyCallingNonCallable
+        self.form: Form = self.get_meta().form_class(**setdefaults_path(
+            Namespace(),
+            form_args,
+            _name='form',
+            fields=declared_fields,
+            attrs__method='get',
+            actions__submit=dict(
+                attrs={'data-iommi-filter-button': ''},
+                display_name=gettext('Filter'),
+            ),
+        )).refine_done(parent=self)
+
     def on_bind(self) -> None:
         # Prevent the nested form from thinking it's a part of a nested form set up
         if 'form' in self._evaluate_parameters:
@@ -737,34 +772,6 @@ class Query(Part):
 
         request = self.get_request()
         self.query_advanced_value = request_data(request).get(self.get_advanced_query_param(), '') if request else ''
-
-        # TODO: should it be possible to have freetext as a callable? this code just treats callables as truthy
-        if any(f.freetext for f in values(declared_members(self)['filters'])):
-            set_and_remember_for_reinvoke(declared_members(self.form).fields[FREETEXT_SEARCH_NAME], include=True)
-
-        declared_fields = declared_members(self.form)['fields']
-        for name, filter in items(self.filters):
-            is_valid, message = filter.is_valid_filter(name=name, filter=filter)
-            assert is_valid, message
-            if name in declared_fields:
-                field = setdefaults_path(
-                    Namespace(),
-                    _name=name,
-                    attr=name if filter.attr is MISSING else filter.attr,
-                    model_field=filter.model_field,
-                    help__include=False,
-                )
-                declared_fields[name] = reinvoke(declared_fields[name], field)
-        set_declared_member(self.form, 'fields', declared_fields)
-
-        # Remove fields from the form that correspond to non-included filters
-        declared_filters = declared_members(self)['filters']
-        for name, field in items(declared_fields):
-            if name == FREETEXT_SEARCH_NAME:
-                continue
-            # We need to check if it's in declared_filters first, otherwise we remove any injected fields
-            if name in declared_filters and name not in self.filters:
-                set_and_remember_for_reinvoke(field, include=False)
 
         bind_members(self, name='endpoints')
 

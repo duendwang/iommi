@@ -36,41 +36,43 @@ from iommi.evaluate import evaluate_strict
 from iommi.fragment import Tag
 from iommi.member import (
     bind_members,
-    collect_members,
+    refine_done_members,
 )
 from iommi.part import Part
-from iommi.reinvokable import reinvokable
-from iommi.traversable import (
+from iommi._web_compat import settings
+from iommi.refinable import (
     EvaluatedRefinable,
+    RefinableMembers,
 )
 
 
 class MenuBase(Part, Tag):
     tag: str = EvaluatedRefinable()
     sort: bool = EvaluatedRefinable()  # only applies for submenu items
-    sub_menu: Dict = Refinable()
+    sub_menu: Dict = RefinableMembers()
     attrs: Attrs = Refinable()  # attrs is evaluated, but in a special way so gets no EvaluatedRefinable type
     template: Union[str, Template] = EvaluatedRefinable()
 
-    @reinvokable
     @dispatch(
         sort=True,
         sub_menu=EMPTY,
         attrs__class=EMPTY,
         attrs__style=EMPTY,
     )
-    def __init__(self, sub_menu, _sub_menu_dict=None, **kwargs):
+    def __init__(self, **kwargs):
         super(MenuBase, self).__init__(**kwargs)
         self._active = False
 
-        collect_members(
+    def on_refine_done(self):
+        refine_done_members(
             self,
             name='sub_menu',
-            items=sub_menu,
+            items=self.sub_menu,
+            items_dict=self.get_declared('_sub_menu_dict'),
             # TODO: cls=self.get_meta().member_class,
-            items_dict=_sub_menu_dict,
             cls=MenuItem,
         )
+        super().on_refine_done()
 
     def __repr__(self):
         r = f'{self._name}'
@@ -103,7 +105,6 @@ class MenuItem(MenuBase):
     a = Refinable()
     active_class = Refinable()
 
-    @reinvokable
     @dispatch(
         display_name=lambda menu_item, **_: capitalize(menu_item.iommi_name()).replace('_', ' '),
         regex=lambda menu_item, **_: '^' + str(menu_item.url) if menu_item.url else None,
@@ -117,7 +118,7 @@ class MenuItem(MenuBase):
 
     def on_bind(self):
         super(MenuItem, self).on_bind()
-
+        assert self.active_class is not None, 'No active_class provided'
         self.url = evaluate_strict(self.url, **self.iommi_evaluate_parameters())
 
         # If this is a section header, and all sub-parts are hidden, hide myself
@@ -172,7 +173,7 @@ class MenuException(Exception):
 
 
 @with_meta
-@declarative(MenuItem, '_sub_menu_dict')
+@declarative(MenuItem, '_sub_menu_dict', add_init_kwargs=False)
 class Menu(MenuBase):
     """
     Class that describes menus.
@@ -196,7 +197,6 @@ class Menu(MenuBase):
 
     items_container = Refinable()
 
-    @reinvokable
     @dispatch(
         sort=False,
         items_container=EMPTY,

@@ -51,7 +51,6 @@ from tri_declarative import (
     Namespace,
     Refinable,
     refinable,
-    RefinableObject,
     setdefaults_path,
     Shortcut,
     with_meta,
@@ -84,7 +83,6 @@ from iommi.attrs import (
 )
 from iommi.base import (
     build_as_view_wrapper,
-    capitalize,
     get_display_name,
     items,
     keys,
@@ -119,7 +117,7 @@ from iommi.from_model import (
 )
 from iommi.member import (
     bind_members,
-    collect_members,
+    refine_done_members,
 )
 from iommi.page import (
     Page,
@@ -133,15 +131,13 @@ from iommi.query import (
 from iommi.traversable import (
     declared_members,
     evaluated_refinable,
-    EvaluatedRefinable,
-    set_declared_member,
     Traversable,
 )
 from ._db_compat import base_defaults_factory
-from .reinvokable import (
-    reinvokable,
-    reinvoke,
-    set_and_remember_for_reinvoke,
+from iommi.refinable import (
+    EvaluatedRefinable,
+    RefinableMembers,
+    RefinableObject,
 )
 
 LAST = LAST
@@ -363,14 +359,13 @@ class Column(Part):
     data_retrieval_method = EvaluatedRefinable()
     render_column: bool = EvaluatedRefinable()
 
-    @reinvokable
     @dispatch(
         attr=MISSING,
         sort_default_desc=False,
         sortable=lambda column, **_: column.attr is not None,
         auto_rowspan=False,
         bulk__include=False,
-        filter__include=False,
+        filter=EMPTY,
         data_retrieval_method=DataRetrievalMethods.attribute_access,
         cell__template=None,
         cell__attrs=EMPTY,
@@ -389,7 +384,7 @@ class Column(Part):
         header__url=None,
         render_column=True,
     )
-    def __init__(self, header, **kwargs):
+    def __init__(self, **kwargs):
         """
         Parameters with the prefix `filter__` will be passed along downstream to the `Filter` instance if applicable. This can be used to tweak the filtering of a column.
 
@@ -417,12 +412,14 @@ class Column(Part):
         model_field = kwargs.get('model_field')
         if model_field and model_field.remote_field:
             kwargs['model'] = model_field.remote_field.model
+        super(Column, self).__init__(**kwargs)
 
-        super(Column, self).__init__(header=HeaderColumnConfig(**header), **kwargs)
-
+    def on_refine_done(self):
+        self.header = HeaderColumnConfig(**self.header).refine_done(parent=self)
         self.is_sorting: bool = None
         self.sort_direction: str = None
         self.table = None
+        super(Column, self).on_refine_done()
 
     def __html__(self, *, render=None):
         assert (
@@ -563,6 +560,7 @@ class Column(Part):
         sortable=False,
         filter__is_valid_filter=lambda **_: (True, ''),
         filter__field__include=False,
+        attr=None,
     )
     def select(cls, checkbox_name='pk', checked=lambda row, **_: False, call_target=None, **kwargs):
         """
@@ -884,11 +882,11 @@ class Cells(Traversable, Tag):
         for column in values(self.iommi_parent().columns):
             if not column.render_column:
                 continue
-            yield Cell(cells=self, column=column)
+            yield Cell(cells=self, column=column).refine_done(parent=self)
 
     def __getitem__(self, name):
         column = self.iommi_parent().columns[name]
-        return Cell(cells=self, column=column)
+        return Cell(cells=self, column=column).refine_done(parent=self)
 
 
 class CellConfig(RefinableObject, Tag):
@@ -923,7 +921,8 @@ class Cell(CellConfig):
         self.table = cells.iommi_parent()
         self.row = cells.row
 
-        self._evaluate_parameters = {**self.cells.iommi_evaluate_parameters(), 'column': column}
+    def on_refine_done(self):
+        self._evaluate_parameters = {**self.cells.iommi_evaluate_parameters(), 'column': self.column}
 
         self.value = evaluate_strict(self.value, **self._evaluate_parameters)
         self._evaluate_parameters['value'] = self.value
@@ -1025,7 +1024,9 @@ class ColumnHeader(object):
     read the docs for :doc:`HeaderConfig`.
     """
 
-    @dispatch()
+    @dispatch(
+        attrs=EMPTY,
+    )
     def __init__(
         self,
         *,
@@ -1192,12 +1193,14 @@ class Paginator(Traversable):
         ),
         slice=lambda top, bottom, rows, **_: rows[bottom:top],
     )
-    @reinvokable
     def __init__(self, **kwargs):
         super(Paginator, self).__init__(**kwargs)
+
+    def on_refine_done(self):
         self.context = None
         self.page_size = None
         self.rows = None
+        super(Paginator, self).on_refine_done()
 
     def on_bind(self) -> None:
         request = self.get_request()
@@ -1350,7 +1353,7 @@ def endpoint__csv(table, **_):
             return value
 
     def cell_value(cells, bound_column):
-        value = Cell(cells, bound_column).value
+        value = Cell(cells, bound_column).refine_done(parent=cells).value
         return bound_column.extra_evaluated.get('report_value', value)
 
     def rows():
@@ -1386,7 +1389,7 @@ class _Lazy_tbody:
         return mark_safe('\n'.join([cells.__html__() for cells in self.table.cells_for_rows()]))
 
 
-@declarative(Column, '_columns_dict')
+@declarative(Column, '_columns_dict', add_init_kwargs=False)
 @with_meta
 class Table(Part, Tag):
     """
@@ -1404,6 +1407,7 @@ class Table(Part, Tag):
 
     """
 
+    query = Refinable()
     bulk_filter: Namespace = EvaluatedRefinable()
     bulk_exclude: Namespace = EvaluatedRefinable()
     sortable: bool = EvaluatedRefinable()
@@ -1420,8 +1424,9 @@ class Table(Part, Tag):
     cell: CellConfig = EvaluatedRefinable()
     header = Refinable()
     model: Type[Model] = Refinable()  # model is evaluated, but in a special way so gets no EvaluatedRefinable type
-    initial_rows = Refinable()  # initial_rows is evaluated, but in a special way so gets no EvaluatedRefinable type
-    columns = Refinable()
+    rows = Refinable()  # rows is evaluated, but in a special way so gets no EvaluatedRefinable type
+    actions: Dict[str, Action] = RefinableMembers()
+    parts: Namespace = RefinableMembers()
     bulk: Optional[Form] = EvaluatedRefinable()
     bulk_container: Fragment = Refinable()
     superheader: Namespace = Refinable()
@@ -1441,6 +1446,10 @@ class Table(Part, Tag):
 
     empty_message: str = Refinable()
     invalid_form_message: str = Refinable()
+    auto = Refinable()
+
+    # Columns need to be at the end to not steal the short names
+    columns: Dict[str, Column] = RefinableMembers()
 
     class Meta:
         assets__query_form_toggle_script__template = "iommi/query/form_toggle_script.html"
@@ -1480,7 +1489,6 @@ class Table(Part, Tag):
     def post_bulk_edit(table, queryset, updates, **_):
         pass
 
-    @reinvokable
     @dispatch(
         columns=EMPTY,
         bulk_filter={},
@@ -1526,22 +1534,11 @@ class Table(Part, Tag):
         # action button on the page. So let's use the secondary
         # style
         query__form__actions__submit__call_target=Action.button,
+        title=MISSING,
+        rows=None,
     )
     def __init__(
         self,
-        *,
-        columns: Namespace = None,
-        _columns_dict=None,
-        model=None,
-        rows=None,
-        bulk=None,
-        header=None,
-        query=None,
-        row=None,
-        parts: Namespace = None,
-        actions: Namespace = None,
-        auto,
-        title=MISSING,
         **kwargs,
     ):
         """
@@ -1554,9 +1551,13 @@ class Table(Part, Tag):
         :param bulk_exclude: exclude filters to apply to the `QuerySet` before performing the bulk operation
         :param sortable: set this to `False` to turn off sorting for all columns
         """
-        select_conf = columns.get('select', {})
-        if 'select' not in _columns_dict and isinstance(select_conf, dict):
-            columns['select'] = setdefaults_path(
+        super(Table, self).__init__(**kwargs)
+
+    def on_refine_done(self):
+        select_conf = self.columns.get('select', {})
+        if isinstance(select_conf, dict):
+            # @todo deprecate
+            self.columns['select'] = setdefaults_path(
                 Namespace(),
                 select_conf,
                 call_target__attribute='select',
@@ -1565,12 +1566,14 @@ class Table(Part, Tag):
                 include=False,
             )
 
-        if auto:
-            auto = TableAutoConfig(**auto)
+        model = self.model
+        rows = self.rows
+        if self.auto:
+            auto = TableAutoConfig(**self.auto).refine_done(parent=self)
             auto_model, auto_rows, columns = self._from_model(
                 model=auto.model,
                 rows=auto.rows,
-                columns=columns,
+                columns=self.columns,
                 include=auto.include,
                 exclude=auto.exclude,
             )
@@ -1581,38 +1584,49 @@ class Table(Part, Tag):
             )
             model = auto_model
 
+            self.columns.update(columns)
+
             if rows is None:
                 rows = auto_rows
 
-            if title is MISSING:
-                title = f'{model._meta.verbose_name_plural.title()}'
+            if self.title is MISSING:
+                self.title = f'{model._meta.verbose_name_plural.title()}'
 
-        if title is MISSING:
-            title = None
+        if self.title is MISSING:
+            self.title = None
 
-        model, rows = model_and_rows(model, rows)
+        self.model, self.rows = model_and_rows(model, rows)
 
-        assert isinstance(columns, dict)
-
-        self.columns = None
-
-        super(Table, self).__init__(
-            model=model, initial_rows=rows, header=HeaderConfig(**header), row=RowConfig(**row), title=title, **kwargs
-        )
+        self.initial_rows = self.rows
+        self.header = HeaderConfig(**self.header).refine_done(parent=self)
+        self.row = RowConfig(**self.row).refine_done(parent=self)
 
         # In bind initial_rows will be used to set these 3 (in that order)
         self.sorted_rows = None
         self.sorted_and_filtered_rows = None
         self.visible_rows = None
 
-        collect_members(self, name='actions', items=actions, cls=self.get_meta().action_class)
-        collect_members(self, name='columns', items=columns, items_dict=_columns_dict, cls=self.get_meta().member_class)
-        collect_members(self, name='parts', items=parts, cls=Fragment)
+        refine_done_members(self, name='actions', items=self.actions, cls=self.get_meta().action_class, members_cls=Actions)
+        refine_done_members(
+            self,
+            name='columns',
+            items=self.columns,
+            items_dict=self.get_declared('_columns_dict'),
+            cls=self.get_meta().member_class,
+        )
 
-        self.query_args = query
+        if not self.sortable:
+            for column in values(self.namespace.columns):
+                # Special case for entire table not sortable
+                column.sortable = False
+
+        refine_done_members(self, name='parts', items=self.parts, cls=Fragment)
+
+        query_args = self.query
+        bulk_args = self.bulk
+
         self.query: Query = None
-
-        self.bulk = None
+        self.bulk: Form = None
         self.header_levels = None
 
         def add_hidden_all_pks_field(declared_bulk_fields):
@@ -1631,9 +1645,11 @@ class Table(Part, Tag):
 
             field_class = self.get_meta().query_class.get_meta().member_class
 
-            for name, column in items(declared_members(self).columns):
-                # TODO: bulk does this, shouldn't this code also do it: `filter = query.fields.pop(name, {})` and then send that into the setdefaults_path below?
-
+            for name, column in items(self.namespace.columns):
+                if getattr(column, 'include', None) is False:
+                    continue
+                if getattr(column.filter, 'include', None) is False:
+                    continue
                 filter = setdefaults_path(
                     Namespace(),
                     column.filter,
@@ -1646,51 +1662,71 @@ class Table(Part, Tag):
                     field__display_name=column.display_name,
                 )
                 # Special case for automatic query config
-                if self.query_from_indexes and column.model_field and (getattr(column.model_field, 'db_index', False) or isinstance(column.model_field, AutoField)):
-                    filter.include = True
+                should_have_filter = (
+                    self.query_from_indexes
+                    and column.model_field
+                    and (getattr(column.model_field, 'db_index', False) or isinstance(column.model_field, AutoField))
+                )
+                setdefaults_path(
+                    filter,
+                    include=should_have_filter,
+                )
 
                 filters[name] = filter()
 
-            self.query = self.get_meta().query_class(
-                _filters_dict=filters, _name='query', model=self.model, **self.query_args
-            )
-            declared_members(self).query = self.query
+            self.query = self.get_meta().query_class(**setdefaults_path(
+                Namespace(),
+                query_args,
+                filters=filters,
+                _name='query',
+                model=self.model,
+            ))
+
+            declared_filters = self.query.namespace.filters
+            for name, column in items(self.namespace.columns):
+                if name in filters and filters[name].include:
+                    declared_filters[name] = declared_filters[name].refine(
+                        # field__display_name=lambda table, field, **_: table.columns[field._name].display_name,
+                    )
+
+            self.query = self.query.refine_defaults(filters=declared_filters)
 
             # Bulk
             field_class = self.get_meta().form_class.get_meta().member_class
 
             declared_bulk_fields = Struct()
-            for name, column in items(declared_members(self).columns):
-                field = bulk.fields.pop(name, {})
+            for name, column in items(self.namespace.columns):
+                if getattr(column, 'include', None) is False:
+                    continue
+                if getattr(column.bulk, 'include', None) is False:
+                    continue
+                field = setdefaults_path(
+                    Namespace(),
+                    column.bulk,
+                    dict(
+                        call_target__cls=field_class,
+                        model=self.model,
+                        model_field_name=column.model_field_name,
+                        _name=name,
+                        attr=name if column.attr is MISSING else column.attr,
+                        required=False,
+                        empty_choice_tuple=(None, '', '---', True),
+                        parse_empty_string_as_none=True,
+                        display_name=column.display_name,
+                    ),
+                )
+                if isinstance(column.model_field, BooleanField):
+                    field.call_target.attribute = 'boolean_tristate'
 
-                if column.bulk.include:
-                    field = setdefaults_path(
-                        Namespace(),
-                        column.bulk,
-                        dict(
-                            call_target__cls=field_class,
-                            model=self.model,
-                            model_field_name=column.model_field_name,
-                            _name=name,
-                            attr=name if column.attr is MISSING else column.attr,
-                            required=False,
-                            empty_choice_tuple=(None, '', '---', True),
-                            parse_empty_string_as_none=True,
-                            display_name=column.display_name,
-                        ),
-                        **field,
-                    )
-                    if isinstance(column.model_field, BooleanField):
-                        field.call_target.attribute = 'boolean_tristate'
-
-                    declared_bulk_fields[name] = field()
+                declared_bulk_fields[name] = field()
 
             add_hidden_all_pks_field(declared_bulk_fields)
 
             # x.bulk.include can be a callable here. We treat that as truthy on purpose.
-            if any(x.bulk.include for x in values(declared_members(self).columns)) or 'actions' in bulk:
-                self.bulk = form_class(
-                    _fields_dict=declared_bulk_fields,
+            if any(x.bulk.include for x in values(self.namespace.columns)) or 'actions' in self.namespace.bulk:
+                self.bulk = form_class(**setdefaults_path(
+                    Namespace(),
+                    bulk_args,
                     _name='bulk',
                     model=self.model,
                     actions__submit=dict(
@@ -1704,12 +1740,11 @@ class Table(Part, Tag):
                         display_name=gettext_lazy('Bulk delete'),
                         include=False,
                     ),
-                    **bulk,
+                )).refine_defaults(
+                    fields=declared_bulk_fields,
                 )
 
-            declared_members(self).bulk = self.bulk
-
-        if not self.model and not self.bulk and 'actions' in bulk:
+        if not self.model and not self.bulk and 'actions' in self.namespace.bulk:  # @todo
             # Support custom 'bulk' actions even when there is no model
             if any(x.bulk.include for x in values(declared_members(self).columns)):
                 assert False, "The builtin bulk actions only work on querysets."
@@ -1717,18 +1752,34 @@ class Table(Part, Tag):
             add_hidden_all_pks_field(declared_bulk_fields)
             self.bulk = form_class(
                 _name='bulk',
-                _fields_dict=declared_bulk_fields,
                 # We don't want form's default submit button unless somebody
                 # explicitly added it again.
-                actions__submit=bulk['actions'].get('submit', None),
-                **bulk,
+                actions__submit=bulk_args['actions'].get('submit', None),
+                **bulk_args,
+            ).refine_defaults(
+                fields=declared_bulk_fields,
             )
-            declared_members(self).bulk = self.bulk
 
-        # Columns need to be at the end to not steal the short names
-        declared_members(self).columns = declared_members(self).pop('columns')
+        if self.bulk is not None:
+            self.bulk = self.bulk.refine_done(parent=self)
 
-        self.bulk_container = self.bulk_container(_name='bulk_container')
+        if self.query is not None:
+            self.query = self.query.refine_done(parent=self)
+
+        self.bulk_container = self.bulk_container(_name='bulk_container').refine_done(parent=self)
+
+        # If the column is not included, the down stream query filters and bulk fields should also be gone
+        # declared_query_filters = declared_members(self.query)['filters'] if self.query is not None else {}
+        # declared_bulk_fields = declared_members(self.bulk)['fields'] if self.bulk is not None else {}
+        #
+        # for name, column in items(declared_members(self).columns):
+        #     if name not in keys(self.columns):
+        #         if name in declared_query_filters:
+        #             set_and_remember_for_reinvoke(declared_query_filters[name], include=False)
+        #         if name in declared_bulk_fields:
+        #             set_and_remember_for_reinvoke(declared_bulk_fields[name], include=False)
+
+        super(Table, self).on_refine_done()
 
     @classmethod
     @class_shortcut(
@@ -1746,7 +1797,7 @@ class Table(Part, Tag):
         return self.parts.page
 
     def on_bind(self) -> None:
-        bind_members(self, name='actions', cls=Actions)
+        bind_members(self, name='actions')
         bind_members(self, name='columns')
         bind_members(self, name='endpoints')
         bind_members(self, name='parts')
@@ -1772,26 +1823,6 @@ class Table(Part, Tag):
             self.rows = self.initial_rows
 
         self._prepare_sorting()
-
-        if not self.sortable:
-            # TODO: we could do this on the unbound stuff instead. This is bad because it triggers _bind_all()
-            for column in values(self.columns):
-                # Special case for entire table not sortable
-                column.sortable = False
-
-        # If the column is not included, the down stream query filters and bulk fields should also be gone
-        declared_query_filters = (
-            declared_members(self.query)['filters'] if self._declared_members.get('query') is not None else {}
-        )
-        declared_bulk_fields = (
-            declared_members(self.bulk)['fields'] if self._declared_members.get('bulk') is not None else {}
-        )
-        for name, column in items(self._declared_members.columns):
-            if name not in keys(self.columns):
-                if name in declared_query_filters:
-                    set_and_remember_for_reinvoke(declared_query_filters[name], include=False)
-                if name in declared_bulk_fields:
-                    set_and_remember_for_reinvoke(declared_bulk_fields[name], include=False)
 
         self._bind_query()
         self._bind_bulk_form()
@@ -1829,15 +1860,6 @@ class Table(Part, Tag):
         if self.query is None:
             return
 
-        declared_filters = declared_members(self.query)['filters']
-        for name, column in items(declared_members(self)['columns']):
-            if name in declared_filters:
-                filter = Namespace(
-                    field__display_name=lambda table, field, **_: table.columns[field._name].display_name,
-                )
-                declared_filters[name] = reinvoke(declared_filters[name], filter)
-        set_declared_member(self.query, 'filters', declared_filters)
-
         self.query = self.query.bind(parent=self)
         self._bound_members.query = self.query
 
@@ -1853,17 +1875,6 @@ class Table(Part, Tag):
     def _bind_bulk_form(self):
         if self.bulk is None:
             return
-
-        declared_fields = declared_members(self.bulk)['fields']
-        for name, column in items(declared_members(self)['columns']):
-            if name in declared_fields:
-                field = setdefaults_path(
-                    Namespace(),
-                    column.bulk,
-                    display_name=lambda table, field, **_: table.columns[field._name].display_name,
-                )
-                declared_fields[name] = reinvoke(declared_fields[name], field)
-        set_declared_member(self.bulk, 'fields', declared_fields)
 
         self.bulk = self.bulk.bind(parent=self)
         if self.bulk is not None:
@@ -1903,7 +1914,7 @@ class Table(Part, Tag):
                 prev_value = no_value_set
                 prev_row = no_value_set
                 for cells in self.cells_for_rows():
-                    value = Cell(cells, column).value
+                    value = Cell(cells, column).refine_done(parent=self).value
                     if prev_value != value:
                         rowspan_by_row[id(cells.row)] = 1
                         prev_value = value

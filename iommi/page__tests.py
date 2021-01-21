@@ -21,15 +21,26 @@ from tests.helpers import (
 )
 
 
+def test_simple_page():
+    class MyPage(Page):
+        footer = html.div(
+            html.hr(),
+        )
+
+    my_page = MyPage()
+    my_page.bind(request=req('GET')).render_to_response()
+    my_page.bind(request=req('GET')).render_to_response()
+
+
 def test_page_constructor():
     class MyPage(Page):
         h1 = html.h1()
 
-    my_page = MyPage(parts__foo=html.div(_name='foo'), parts__bar=html.div())
+    my_page = MyPage(parts__foo=html.div(_name='foo'), parts__bar=html.div()).refine_done()
 
-    assert ['h1', 'foo', 'bar'] == list(declared_members(my_page).parts.keys())
+    assert list(declared_members(my_page).parts.keys()) == ['h1', 'foo', 'bar']
     my_page = my_page.bind(request=None)
-    assert ['h1', 'foo', 'bar'] == list(my_page.parts.keys())
+    assert list(my_page.parts.keys()) == ['h1', 'foo', 'bar']
 
 
 @pytest.mark.skipif(python_implementation() == 'PyPy', reason='Intermittently fails on pypy for unknown reasons.')
@@ -47,7 +58,7 @@ def test_page_render():
         header = html.h1('Foo')
         body = html.div('bar bar')
 
-    my_page = MyPage()
+    my_page = MyPage(parts__footer=html.div('footer'))
     my_page = my_page.bind(request=user_req('get'))
 
     response = my_page.render_to_response()
@@ -61,6 +72,7 @@ def test_page_render():
             <body>
                  <h1> Foo </h1>
                  <div> bar bar </div>
+                 <div> footer </div>
             </body>
         </html>
     '''
@@ -74,7 +86,7 @@ def test_promote_str_to_fragment_for_page():
     class MyPage(Page):
         foo = 'asd'
 
-    page = MyPage()
+    page = MyPage().refine_done()
     assert isinstance(declared_members(page).parts.foo, Fragment)
 
 

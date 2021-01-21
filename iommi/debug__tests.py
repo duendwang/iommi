@@ -47,18 +47,26 @@ def test_debug_tree(settings):
 
     assert isinstance(result, Table)
     tree = [', '.join([str(x.value) for x in cells]) for cells in result.cells_for_rows()]
-    expected = """, , MyPage, True
-endpoints, None, Members[Endpoint], True
+    expected = ('''\
+, , MyPage, True
+assets, None, Members, True
+endpoints, None, Members[Namespace], True
 endpoints__debug_tree, debug_tree, Endpoint, True
 parts, None, Members[Part], True
 parts__bar, bar, Fragment, True
-parts__bar__children, None, Members[str], True
+parts__bar__assets, None, Members, True
+parts__bar__endpoints, None, Members, True
+parts__bar__children, None, Members[Namespace], True
 parts__bar__children__text, None, str, False
 parts__nested, nested, NestedPage, True
+parts__nested__assets, None, Members, True
+parts__nested__endpoints, None, Members, True
 parts__nested__parts, None, Members[Part], True
 parts__nested__parts__foo, foo, Fragment, True
-parts__nested__parts__foo__children, None, Members[str], True
-parts__nested__parts__foo__children__text, None, str, False"""
+parts__nested__parts__foo__assets, None, Members, True
+parts__nested__parts__foo__endpoints, None, Members, True
+parts__nested__parts__foo__children, None, Members[Namespace], True
+parts__nested__parts__foo__children__text, None, str, False''')
     assert '\n'.join(tree) == expected
 
 

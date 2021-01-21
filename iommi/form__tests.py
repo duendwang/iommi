@@ -44,6 +44,7 @@ from iommi.attrs import render_attrs
 from iommi.base import (
     items,
     keys,
+    MISSING,
     values,
 )
 from iommi.endpoint import (
@@ -972,7 +973,13 @@ def test_help_text_from_model2():
     from tests.models import Foo, Bar
 
     # simple integer field
-    form = Form(auto__model=Foo, auto__include=['foo']).bind(request=req('get', foo='1'))
+    form = Form(
+        auto__model=Foo,
+        auto__include=['foo'],
+    ).bind(
+        request=req('get', foo='1'),
+    )
+    assert list(form.fields.keys()) == ['foo']
     assert form.fields.foo.model_field is Foo._meta.get_field('foo')
     assert form.fields.foo.help_text == 'foo_help_text'
 
@@ -1172,10 +1179,10 @@ def test_field_from_model_required():
         c = TextField(blank=False, null=True)
         d = TextField(blank=False, null=False)
 
-    assert not Field.from_model(FooModel, 'a').required
-    assert not Field.from_model(FooModel, 'b').required
-    assert not Field.from_model(FooModel, 'c').required
-    assert Field.from_model(FooModel, 'd').required
+    assert not Field.from_model(FooModel, 'a').refine_done().required
+    assert not Field.from_model(FooModel, 'b').refine_done().required
+    assert not Field.from_model(FooModel, 'c').refine_done().required
+    assert Field.from_model(FooModel, 'd').refine_done().required
 
 
 @pytest.mark.django
@@ -1186,7 +1193,7 @@ def test_field_from_model_label():
     class FieldFromModelModel(Model):
         a = TextField(verbose_name='FOOO bar FOO')
 
-    assert Field.from_model(FieldFromModelModel, 'a').display_name == 'FOOO bar FOO'
+    assert Field.from_model(FieldFromModelModel, 'a').refine_done().display_name == 'FOOO bar FOO'
 
 
 @pytest.mark.django_db
@@ -1308,10 +1315,10 @@ def test_field_from_model_blank_handling():
 
     from django.db.models import CharField
 
-    subject = Field.from_model(model=Foo, model_field=CharField(null=True, blank=False))
+    subject = Field.from_model(model=Foo, model_field=CharField(null=True, blank=False)).refine_done()
     assert True is subject.parse_empty_string_as_none
 
-    subject = Field.from_model(model=Foo, model_field=CharField(null=False, blank=True))
+    subject = Field.from_model(model=Foo, model_field=CharField(null=False, blank=True)).refine_done()
     assert False is subject.parse_empty_string_as_none
 
 
@@ -1333,7 +1340,7 @@ def test_overriding_parse_empty_string_as_none_in_shortcut():
         factory_lookup={CharField: s},
         factory_lookup_register_function=register_field_factory,
         defaults_factory=field_defaults_factory,
-    )
+    ).refine_done()
 
     assert 'foo' == x.parse_empty_string_as_none
 
@@ -2095,8 +2102,9 @@ def test_field_from_model_path_minimal():
     from tests.models import Bar
 
     class FooForm(Form):
-        baz = Field.from_model(Bar, 'foo__foo', help_text='another help text')
+        baz = Field.from_model(model=Bar, model_field_name='foo__foo', help_text='another help text')
 
+    assert FooForm.baz.refine().refine_done().attr == 'foo__foo'
     assert FooForm().bind(request=req('get', baz='1')).fields.baz.attr == 'foo__foo'
 
 
@@ -2130,7 +2138,7 @@ def test_field_from_model_subtype():
     class FromModelSubtype(models.Model):
         foo = Foo()
 
-    result = Field.from_model(model=FromModelSubtype, model_field_name='foo')
+    result = Field.from_model(model=FromModelSubtype, model_field_name='foo').refine_done()
 
     assert result.parse is int_parse
 
@@ -2214,7 +2222,7 @@ def test_from_model_with_inheritance():
     )
 
     assert was_called == {
-        'MyField.float': 2,
+        'MyField.float': 1,
     }
 
 
@@ -2269,7 +2277,7 @@ def test_dunder_name_for_column():
 
     form = FooForm()
     form = form.bind(request=None)
-    assert list(form.fields.keys()) == ['foo', 'foo__a']
+    assert list(form.fields.keys()) == ['foo', 'foo_a']
 
 
 def test_help_text_for_boolean_tristate():
@@ -2339,7 +2347,7 @@ def test_shortcut_to_subclass():
                 **kwargs
             )  # pragma: no cover: we aren't testing that this shortcut is implemented correctly
 
-    field = MyField.choice(choices=[])
+    field = MyField.choice(choices=[]).refine_done()
     assert isinstance(field, MyField)
     assert field.empty_label == '---'
 
