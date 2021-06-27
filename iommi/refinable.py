@@ -2,6 +2,7 @@ from copy import copy
 
 from tri_declarative import (
     declarative,
+    dispatch,
     flatten,
     getattr_path,
     Namespace,
@@ -113,7 +114,7 @@ def is_evaluated_refinable(x):
 
 @declarative(
     member_class=Refinable,
-    parameter='refinable_members',
+    parameter='refinable',
     is_member=is_refinable_function,
     add_init_kwargs=False,
 )
@@ -122,13 +123,14 @@ class RefinableObject:
     namespace: Namespace
     is_refine_done: bool
 
+    @dispatch()
     def __init__(self, namespace=None, **kwargs):
         if namespace is None:
             namespace = Namespace()
         else:
             namespace = Namespace(namespace)
 
-        declared_items = self.get_declared('refinable_members')
+        declared_items = self.get_declared('refinable')
         for name in list(kwargs):
             prefix, _, _ = name.partition('__')
             if prefix in declared_items:
@@ -160,7 +162,7 @@ Available attributes:
                 result = result.apply_styles(parent.iommi_style, is_root=False)
 
         # Apply config from result.namespace to result
-        declared_items = result.get_declared('refinable_members')
+        declared_items = result.get_declared('refinable')
         remaining_namespace = Namespace(result.namespace)
         for k, v in items(declared_items):
             if k == 'iommi_style':

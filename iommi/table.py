@@ -1015,7 +1015,7 @@ class RowConfig(RefinableObject, Tag):
     extra_evaluated: Dict[str, Any] = Refinable()
 
     def as_dict(self):
-        return {k: getattr(self, k) for k in keys(self.get_declared('refinable_members'))}
+        return {k: getattr(self, k) for k in keys(self.get_declared('refinable'))}
 
 
 class ColumnHeader(object):

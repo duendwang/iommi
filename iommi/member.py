@@ -75,7 +75,7 @@ def refine_done_members(
             f'The names {", ".join(sorted(forbidden_names))} are reserved by iommi, please pick other names'
         )
 
-    assert isinstance(container.get_declared('refinable_members')[name], RefinableMembers)
+    assert isinstance(container.get_declared('refinable')[name], RefinableMembers)
 
     member_by_name = Struct()
     _unapplied_config = {}

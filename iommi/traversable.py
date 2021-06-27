@@ -137,7 +137,7 @@ class Traversable(RefinableObject):
 
         result.iommi_style = iommi_style
 
-        for k, v in items(result.get_declared('refinable_members')):
+        for k, v in items(result.get_declared('refinable')):
             if isinstance(v, Traversable):
                 setattr(result, k, v.apply_styles(iommi_style, is_root=False))
 
@@ -194,7 +194,7 @@ class Traversable(RefinableObject):
             result.attrs = evaluate_attrs(result, **result.iommi_evaluate_parameters())
 
         evaluated_attributes = [
-            k for k, v in items(result.get_declared('refinable_members')) if is_evaluated_refinable(v)
+            k for k, v in items(result.get_declared('refinable')) if is_evaluated_refinable(v)
         ]
         evaluate_members(result, evaluated_attributes, **evaluate_parameters)
 
@@ -230,7 +230,7 @@ def declared_members(node: Traversable) -> Any:
     if not node.is_refine_done:
         print("!!! Trying to find declared_member on RefinableObject without doing refine_done() first !!!")
     result = Namespace()
-    for k, v in items(node.get_declared('refinable_members')):
+    for k, v in items(node.get_declared('refinable')):
         if isinstance(v, RefinableMembers):
             result[k] = node.namespace.get(k, Namespace())
         else:
