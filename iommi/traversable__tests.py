@@ -414,7 +414,7 @@ def test_get_config():
                 super(BasketBase, self).__init__(**kwargs)
 
             def on_refine_done(self):
-                refine_done_members(self, name='fruits', items=self.fruits, items_dict=self.get_declared('fruits'), cls=Fruit)
+                refine_done_members(self, name='fruits', members_from_namespace=self.fruits, members_from_declared=self.get_declared('fruits'), cls=Fruit)
 
             def on_bind(self) -> None:
                 bind_members(self, name='fruits')

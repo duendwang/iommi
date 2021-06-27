@@ -684,13 +684,7 @@ class Query(Part):
         self.query_advanced_value = None
         self.query_error = None
 
-        refine_done_members(
-            self,
-            name='filters',
-            items=self.filters,
-            items_dict=self.get_declared('_filters_dict'),
-            cls=self.get_meta().member_class,
-        )
+        refine_done_members(self, name='filters', members_from_namespace=self.filters, members_from_declared=self.get_declared('_filters_dict'), cls=self.get_meta().member_class)
 
         self._on_refine_done_form()
 

@@ -86,7 +86,7 @@ class Page(Part):
         _parts_dict = {k: as_fragment_if_needed(k, v) for k, v in items(self.get_declared('parts_dict'))}
         self.parts = Namespace({k: as_fragment_if_needed(k, v) for k, v in items(self.parts)})
 
-        refine_done_members(self, name='parts', items=self.parts, items_dict=_parts_dict, cls=self.get_meta().member_class)
+        refine_done_members(self, name='parts', members_from_namespace=self.parts, members_from_declared=_parts_dict, cls=self.get_meta().member_class)
 
         super(Page, self).on_refine_done()
 

@@ -1606,21 +1606,15 @@ class Table(Part, Tag):
         self.sorted_and_filtered_rows = None
         self.visible_rows = None
 
-        refine_done_members(self, name='actions', items=self.actions, cls=self.get_meta().action_class, members_cls=Actions)
-        refine_done_members(
-            self,
-            name='columns',
-            items=self.columns,
-            items_dict=self.get_declared('_columns_dict'),
-            cls=self.get_meta().member_class,
-        )
+        refine_done_members(self, name='actions', members_from_namespace=self.actions, cls=self.get_meta().action_class, members_cls=Actions)
+        refine_done_members(self, name='columns', members_from_namespace=self.columns, members_from_declared=self.get_declared('_columns_dict'), cls=self.get_meta().member_class)
 
         if not self.sortable:
             for column in values(self.namespace.columns):
                 # Special case for entire table not sortable
                 column.sortable = False
 
-        refine_done_members(self, name='parts', items=self.parts, cls=Fragment)
+        refine_done_members(self, name='parts', members_from_namespace=self.parts, cls=Fragment)
 
         query_args = self.query
         bulk_args = self.bulk

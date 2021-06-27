@@ -136,14 +136,7 @@ class Basket(Traversable):
         super(Basket, self).__init__(**kwargs)
 
     def on_refine_done(self):
-        refine_done_members(
-            container=self,
-            name='fruits',
-            items=self.fruits,
-            items_dict=self.get_declared('fruits_dict'),
-            cls=Fruit,
-            unknown_types_fall_through=self.unknown_types_fall_through,
-        )
+        refine_done_members(container=self, name='fruits', members_from_namespace=self.fruits, members_from_declared=self.get_declared('fruits_dict'), cls=Fruit, unknown_types_fall_through=self.unknown_types_fall_through)
         super(Basket, self).on_refine_done()
 
     def on_bind(self):
@@ -159,14 +152,7 @@ class Box(Traversable):
         super(Box, self).__init__(**kwargs)
 
     def on_refine_done(self):
-        refine_done_members(
-            container=self,
-            name='items',
-            items=self.items,
-            items_dict=self.get_declared('items_dict'),
-            cls=Basket,
-            unknown_types_fall_through=self.unknown_types_fall_through,
-        )
+        refine_done_members(container=self, name='items', members_from_namespace=self.items, members_from_declared=self.get_declared('items_dict'), cls=Basket, unknown_types_fall_through=self.unknown_types_fall_through)
         super(Box, self).on_refine_done()
 
     def on_bind(self):

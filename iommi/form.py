@@ -1413,14 +1413,8 @@ class Form(Part):
         self.mode = INITIALS_FROM_GET
         self.parent_form = None
 
-        refine_done_members(self, name='actions', items=self.actions, cls=self.get_meta().action_class, members_cls=Actions)
-        refine_done_members(
-            self,
-            name='fields',
-            items=self.fields,
-            items_dict=self.get_declared('_fields_dict'),
-            cls=self.get_meta().member_class,
-        )
+        refine_done_members(self, name='actions', members_from_namespace=self.actions, cls=self.get_meta().action_class, members_cls=Actions)
+        refine_done_members(self, name='fields', members_from_namespace=self.fields, members_from_declared=self.get_declared('_fields_dict'), cls=self.get_meta().member_class)
 
         super(Form, self).on_refine_done()
 

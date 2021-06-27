@@ -90,8 +90,8 @@ class Part(Traversable):
     def on_refine_done(self):
         from iommi.asset import Asset
 
-        refine_done_members(self, name='endpoints', items=self.endpoints, cls=Endpoint)
-        refine_done_members(self, name='assets', items=self.assets, cls=Asset)
+        refine_done_members(self, name='endpoints', members_from_namespace=self.endpoints, cls=Endpoint)
+        refine_done_members(self, name='assets', members_from_namespace=self.assets, cls=Asset)
         super().on_refine_done()
 
     @dispatch(

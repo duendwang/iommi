@@ -1,9 +1,7 @@
-import warnings
 from copy import (
     copy,
 )
 from typing import (
-    Any,
     Dict,
     Type,
 )
@@ -22,14 +20,10 @@ from iommi.base import (
 from iommi.refinable import RefinableMembers
 from iommi.sort_after import sort_after
 from iommi.traversable import (
-    declared_members,
     Traversable,
 )
 
 FORBIDDEN_NAMES = {x for x in dir(Traversable)} - {'context'}
-
-# Need to use this in collect_members that has a local variable called items
-items_of = items
 
 
 class Members(Traversable):
@@ -48,15 +42,12 @@ class Members(Traversable):
 
 
 def refine_done_members(
-    container,
-    *,
-    name: str,
-    items_dict: Dict = None,
-    items: Dict[str, Any] = None,
-    cls: Type,
-    members_cls: Type = Members,
-    unknown_types_fall_through=False,
-):
+        container, *,
+        name: str, members_from_namespace: Dict[str, Traversable] = None,
+        members_from_declared: Dict[str, Traversable] = None,
+        cls: Type,
+        members_cls: Type = Members,
+        unknown_types_fall_through=False):
     """
     This function is used to collect and merge data from the constructor
     argument, the declared members, and other config into one data structure.
@@ -78,7 +69,7 @@ def refine_done_members(
     In this example the resulting table will have two columns `instrument` and
     `name`, with `instrument` after name even though it was declared before.
     """
-    forbidden_names = FORBIDDEN_NAMES & (set(keys(items_dict or {})) | set(keys(items or {})))
+    forbidden_names = FORBIDDEN_NAMES & (set(keys(members_from_declared or {})) | set(keys(members_from_namespace or {})))
     if forbidden_names:
         raise ForbiddenNamesException(
             f'The names {", ".join(sorted(forbidden_names))} are reserved by iommi, please pick other names'
@@ -86,27 +77,27 @@ def refine_done_members(
 
     assert isinstance(container.get_declared('refinable_members')[name], RefinableMembers)
 
-    unbound_items = Struct()
+    member_by_name = Struct()
     _unapplied_config = {}
 
-    if items_dict is not None:
-        for key, x in items_of(items_dict):
+    if members_from_declared is not None:
+        for key, x in items(members_from_declared):
             if '__' in key:
                 x = x.refine(attr=key)
                 key = key.replace('__', '_')
                 # warnings.warn("Don't specify nested attrs using the field name. You lose the ability to include more config from other places. Pick another name and give the path as attr instead", category=DeprecationWarning)
             x._name = key
-            unbound_items[key] = x
+            member_by_name[key] = x
 
-    if items is not None:
-        for key, item in items_of(items):
+    if members_from_namespace is not None:
+        for key, item in items(members_from_namespace):
             if isinstance(item, Traversable):
                 # noinspection PyProtectedMember
                 assert not item._is_bound
                 item._name = key
-                unbound_items[key] = item
+                member_by_name[key] = item
             elif isinstance(item, dict):
-                if key in unbound_items:
+                if key in member_by_name:
                     _unapplied_config[key] = item
                 else:
                     item = setdefaults_path(
@@ -115,33 +106,33 @@ def refine_done_members(
                         call_target__cls=cls,
                         _name=key,
                     )
-                    unbound_items[key] = item()
+                    member_by_name[key] = item()
             else:
                 assert (
                     unknown_types_fall_through or item is None
                 ), f'I got {type(item)} when creating a {cls.__name__}.{key}, but I was expecting Traversable or dict'
-                unbound_items[key] = item
+                member_by_name[key] = item
 
-    for k, v in items_of(Namespace(_unapplied_config)):
-        unbound_items[k] = unbound_items[k].refine(**v)
+    for k, v in items(Namespace(_unapplied_config)):
+        member_by_name[k] = member_by_name[k].refine(**v)
         # noinspection PyProtectedMember
-        assert unbound_items[k]._name is not None
+        assert member_by_name[k]._name is not None
 
-    to_delete = {k for k, v in items_of(unbound_items) if v is None}
+    to_delete = {k for k, v in items(member_by_name) if v is None}
 
     for k in to_delete:
-        del unbound_items[k]
+        del member_by_name[k]
 
-    for key, item in items_of(unbound_items):
+    for key, item in items(member_by_name):
         if isinstance(item, Traversable):
-            unbound_items[key] = item.refine_done(parent=container)
+            member_by_name[key] = item.refine_done(parent=container)
 
-    unbound_items = sort_after(unbound_items)
-    container.namespace[name] = unbound_items
+    member_by_name = sort_after(member_by_name)
+    container.namespace[name] = member_by_name
 
     m = members_cls(
         _name=name,
-        _declared_members=unbound_items,
+        _declared_members=member_by_name,
         unknown_types_fall_through=unknown_types_fall_through,
     )
     m = m.refine_done(parent=container)

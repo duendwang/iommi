@@ -171,9 +171,7 @@ class Fragment(Part, Tag):
 
     def on_refine_done(self):
         super().on_refine_done()
-        refine_done_members(
-            self, name='children', items=self.namespace.children, cls=Fragment, unknown_types_fall_through=True
-        )
+        refine_done_members(self, name='children', members_from_namespace=self.namespace.children, cls=Fragment, unknown_types_fall_through=True)
 
     def render_text_or_children(self, context):
         request = self.get_request()
