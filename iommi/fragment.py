@@ -159,7 +159,6 @@ class Fragment(Part, Tag):
     children = RefinableMembers()
 
     @dispatch(
-        tag=None,
         children=EMPTY,
         attrs__class=EMPTY,
         attrs__style=EMPTY,

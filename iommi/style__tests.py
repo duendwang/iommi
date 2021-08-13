@@ -409,7 +409,9 @@ def test_assets_render_from_bulma_style():
 </script>
                 <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
             </head>
-            <body />
+            <body >
+                <div class="container main" />
+            </body>
         </html>
     '''
     )
